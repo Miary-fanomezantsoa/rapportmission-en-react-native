@@ -1,65 +1,104 @@
-import React, { useState, useEffect } from 'react';
-import { View, TextInput, TouchableOpacity, Text, StyleSheet, Alert } from 'react-native';
-import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as SQLite from 'expo-sqlite';
+import React, { useEffect, useState } from 'react';
+import { Alert, StyleSheet,Image, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { supabase } from '../../lib/supabase';
+import { useRouter } from 'expo-router';
+
+
+const db = SQLite.openDatabaseSync('local.db');
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
-    // Vérifier si l'utilisateur est déjà connecté localement
+    createLocalTable();
     checkLocalLogin();
   }, []);
 
+  const createLocalTable = async () => {
+    try {
+      await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          email TEXT NOT NULL UNIQUE,
+          password TEXT NOT NULL
+        );
+      `);
+      console.log('✅ Table locale créée (nouvelle API)');
+    } catch (error) {
+      console.error('❌ Erreur création table locale (nouvelle API)', error);
+    }
+  };
+
   const checkLocalLogin = async () => {
-    const userToken = await AsyncStorage.getItem('userToken');
-    if (userToken) {
-      // Si l'utilisateur est trouvé localement, rediriger vers la bonne page
-      navigation.navigate('Home'); // Exemple pour la page d'accueil
+    try {
+      const userToken = await AsyncStorage.getItem('userToken');
+      if (userToken) {
+        router.push('/(tabs)/home');
+      }
+    } catch (error) {
+      console.error("Erreur lors de la vérification de la connexion locale :", error);
     }
   };
 
   const handleLogin = async () => {
     setLoading(true);
+
     try {
-      // D'abord vérifier localement (si un utilisateur est enregistré sur le téléphone)
-      const storedUserEmail = await AsyncStorage.getItem('userEmail');
-      if (storedUserEmail === email) {
-        // Si l'email correspond, on assume qu'il est enregistré localement
-        // Récupérer les autres informations nécessaires et continuer
-        navigation.navigate('Home');  // Exemple vers l'accueil
-        return;
+      let localLoginSuccess = false;
+
+      // 🔍 Vérifie l'utilisateur avec SQLite (nouvelle API)
+      const result = await db.getFirstAsync(
+        'SELECT * FROM users WHERE email = ? AND password = ?',
+        [email, password]
+      );
+
+      if (result) {
+        console.log('✅ Connexion locale réussie !');
+        await AsyncStorage.setItem('userToken', 'local-login');
+        await AsyncStorage.setItem('userEmail', email);
+        router.push('/(tabs)/home');
+        localLoginSuccess = true;
       }
 
-      // Si l'utilisateur n'est pas local, on fait une requête au serveur
-      const response = await axios.post('https://your-server.com/api/login', {
+      if (!localLoginSuccess) {
+        await loginWithSupabase();
+      }
+    } catch (err) {
+      console.error('❌ Erreur SQLite locale', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loginWithSupabase = async () => {
+    try {
+      const { user, session, error  } = await supabase.auth.signIn({
         email,
         password,
       });
 
-      // Si le login est réussi
-      if (response.data.token) {
-        await AsyncStorage.setItem('userToken', response.data.token);
-        await AsyncStorage.setItem('userEmail', email);  // Stocke l'email localement
-        navigation.navigate('Home');  // Rediriger vers la page d'accueil
-      } else {
-        Alert.alert('Erreur', 'Utilisateur ou mot de passe incorrect');
+      if (error) {
+        Alert.alert('Erreur', error.message || 'Connexion Supabase échouée');
+      } else if (session) {
+        await AsyncStorage.setItem('userToken', session.access_token);
+        await AsyncStorage.setItem('userEmail', email);
+        router.push('/(tabs)/home');
       }
-    } catch (error) {
-      Alert.alert('Erreur', 'Impossible de se connecter au serveur');
+    } catch (err) {
+      Alert.alert('Erreur réseau', 'Veillez verifier votre connexion');
     }
-    setLoading(false);
   };
 
   return (
-    <LinearGradient
-      colors={['#1E3C72', '#2A5298']}
-      style={styles.container}
-    >
+    <LinearGradient colors={['#1E3C72', '#2A5298']} style={styles.container}>
       <View style={styles.innerContainer}>
+        <Image source={require('../../assets/images/logo1.jpeg')} style={styles.logo} />
         <TextInput
           style={styles.input}
           placeholder="Adresse Email"
@@ -68,7 +107,6 @@ export default function LoginScreen({ navigation }) {
           value={email}
           onChangeText={setEmail}
         />
-
         <TextInput
           style={styles.input}
           placeholder="Mot de passe"
@@ -77,19 +115,22 @@ export default function LoginScreen({ navigation }) {
           value={password}
           onChangeText={setPassword}
         />
-
         <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
           <Text style={styles.buttonText}>{loading ? 'Chargement...' : 'Se connecter'}</Text>
         </TouchableOpacity>
+        <TouchableOpacity onPress={() => router.push('/(tabs)/SignUpScreen')}>
+          <Text style={{color: '#fff', marginTop: 20, textAlign: 'center'}}>
+            Pas de compte ? Inscrivez-vous
+          </Text>
+        </TouchableOpacity>
+
       </View>
     </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: { flex: 1 },
   innerContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -107,6 +148,11 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     borderRadius: 12,
     marginTop: 10,
+  },
+  logo: {
+    width: 90,
+    height: 90,
+    marginBottom: 10,
   },
   buttonText: {
     color: '#1E3C72',

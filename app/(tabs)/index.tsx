@@ -9,7 +9,7 @@ const WelcomeScreen = ({ navigation }) => {
   return (
     <LinearGradient colors={['#0f2027', '#203a43', '#2c5364']} style={styles.container}>
       <View style={styles.logoContainer}>
-        <Image source={require('../../assets/images/logo.jpeg')} style={styles.logo} />
+        <Image source={require('../../assets/images/logo1.jpeg')} style={styles.logo} />
         <Text style={styles.appTitle}>Mission Report</Text>
         <Text style={styles.subtitle}>Simplifiez la gestion de vos rapports de mission</Text>
       </View>
